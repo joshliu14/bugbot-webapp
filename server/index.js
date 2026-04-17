@@ -53,9 +53,10 @@ function handleSource(ws) {
 
   ws.on('message', (data) => {
     // Forward raw frame to all viewers
+    const payload = data.toString();
     viewers.forEach((viewer) => {
       if (viewer.readyState === 1) {
-        viewer.send(data);
+        viewer.send(payload);
       }
     });
   });
