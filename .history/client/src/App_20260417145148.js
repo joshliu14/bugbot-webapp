@@ -1,12 +1,11 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 
-const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
+const WS_URL = "ws://localhost:8080";
 
 function App() {
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
-  const [status, setStatus] = useState("connecting");
-  const [sourceActive, setSourceActive] = useState(false);
+  const [status, setStatus] = useState("disconnected");
   const [stats, setStats] = useState({ frame: 0, fps: 0, width: 0, height: 0 });
   const [pgmHeader, setPgmHeader] = useState("");
   const fpsCounterRef = useRef({ count: 0, last: Date.now() });
@@ -18,6 +17,7 @@ function App() {
     canvas.height = height;
     const ctx = canvas.getContext("2d");
     const imageData = ctx.createImageData(width, height);
+
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4;
@@ -37,20 +37,18 @@ function App() {
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
-      ws.onopen = () => setStatus("connected");
+      ws.onopen = () => {
+        setStatus("connected");
+        console.log("WebSocket connected");
+      };
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
 
-        if (msg.type === "source_connected") {
-          setSourceActive(true);
-        } else if (msg.type === "source_disconnected") {
-          setSourceActive(false);
-          setPgmHeader("");
-          setStats({ frame: 0, fps: 0, width: 0, height: 0 });
-        } else if (msg.type === "pgm_frame") {
+        if (msg.type === "pgm_frame") {
           drawFrame(msg.pixels, msg.width, msg.height, msg.maxval);
 
+          // Compute FPS
           const now = Date.now();
           fpsCounterRef.current.count++;
           const elapsed = now - fpsCounterRef.current.last;
@@ -60,6 +58,7 @@ function App() {
             setStats({ frame: msg.frame, fps, width: msg.width, height: msg.height });
           }
 
+          // Show PGM header lines
           const headerLines = msg.pgm.split("\n").slice(0, 3).join("  |  ");
           setPgmHeader(headerLines);
         }
@@ -67,15 +66,20 @@ function App() {
 
       ws.onclose = () => {
         setStatus("disconnected");
-        setSourceActive(false);
+        console.log("WebSocket closed, retrying in 2s...");
         setTimeout(connect, 2000);
       };
 
-      ws.onerror = () => ws.close();
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+        ws.close();
+      };
     }
 
     connect();
-    return () => wsRef.current?.close();
+    return () => {
+      if (wsRef.current) wsRef.current.close();
+    };
   }, [drawFrame]);
 
   const statusColor = {
@@ -84,37 +88,34 @@ function App() {
     disconnected: "#ff4455",
   }[status];
 
-  const sourceColor = sourceActive ? "#00ff88" : "#ff4455";
-
   return (
     <div style={styles.root}>
       <div style={styles.panel}>
         <div style={styles.header}>
           <span style={styles.title}>PGM STREAM</span>
-          <div style={styles.badges}>
-            <span style={{ ...styles.badge, background: statusColor }}>
-              SERVER {status.toUpperCase()}
-            </span>
-            <span style={{ ...styles.badge, background: sourceColor }}>
-              SOURCE {sourceActive ? "LIVE" : "WAITING"}
-            </span>
-          </div>
+          <span style={{ ...styles.badge, background: statusColor }}>
+            {status.toUpperCase()}
+          </span>
         </div>
 
         <div style={styles.canvasWrapper}>
-          <canvas ref={canvasRef} style={styles.canvas} />
-          {!sourceActive && (
+          <canvas
+            ref={canvasRef}
+            style={styles.canvas}
+            title="Live PGM Frame"
+          />
+          {status !== "connected" && (
             <div style={styles.overlay}>
               <span style={styles.overlayText}>
-                {status === "connected" ? "Waiting for source…" : "Connecting to server…"}
+                {status === "connecting" ? "Connecting…" : "Awaiting stream"}
               </span>
             </div>
           )}
         </div>
 
         <div style={styles.statsRow}>
-          <Stat label="FRAME" value={stats.frame || "—"} />
-          <Stat label="FPS" value={stats.fps || "—"} />
+          <Stat label="FRAME" value={stats.frame} />
+          <Stat label="FPS" value={stats.fps} />
           <Stat label="SIZE" value={stats.width ? `${stats.width}×${stats.height}` : "—"} />
         </div>
 
@@ -131,7 +132,7 @@ function Stat({ label, value }) {
   return (
     <div style={styles.stat}>
       <span style={styles.statLabel}>{label}</span>
-      <span style={styles.statValue}>{value}</span>
+      <span style={styles.statValue}>{value !== undefined ? value : "—"}</span>
     </div>
   );
 }
@@ -165,7 +166,6 @@ const styles = {
     letterSpacing: "0.15em",
     fontWeight: 700,
   },
-  badges: { display: "flex", gap: 6 },
   badge: {
     fontSize: 10,
     fontWeight: 700,
@@ -182,7 +182,6 @@ const styles = {
     marginBottom: 12,
     border: "1px solid #1e1e2e",
     lineHeight: 0,
-    minHeight: 120,
   },
   canvas: {
     width: "100%",
@@ -195,10 +194,18 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "rgba(0,0,0,0.85)",
+    background: "rgba(0,0,0,0.75)",
   },
-  overlayText: { color: "#555", fontSize: 11, letterSpacing: "0.1em" },
-  statsRow: { display: "flex", gap: 8, marginBottom: 12 },
+  overlayText: {
+    color: "#666",
+    fontSize: 11,
+    letterSpacing: "0.1em",
+  },
+  statsRow: {
+    display: "flex",
+    gap: 8,
+    marginBottom: 12,
+  },
   stat: {
     flex: 1,
     background: "#0d0d16",
@@ -209,8 +216,16 @@ const styles = {
     flexDirection: "column",
     gap: 4,
   },
-  statLabel: { color: "#555", fontSize: 9, letterSpacing: "0.12em" },
-  statValue: { color: "#00ff88", fontSize: 18, fontWeight: 700 },
+  statLabel: {
+    color: "#555",
+    fontSize: 9,
+    letterSpacing: "0.12em",
+  },
+  statValue: {
+    color: "#00ff88",
+    fontSize: 18,
+    fontWeight: 700,
+  },
   pgmBox: {
     background: "#0d0d16",
     border: "1px solid #1e1e2e",
@@ -224,7 +239,12 @@ const styles = {
     display: "block",
     marginBottom: 6,
   },
-  pgmCode: { color: "#7a7aff", fontSize: 11, wordBreak: "break-all", display: "block" },
+  pgmCode: {
+    color: "#7a7aff",
+    fontSize: 11,
+    wordBreak: "break-all",
+    display: "block",
+  },
 };
 
 export default App;

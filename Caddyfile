@@ -1,0 +1,5 @@
+bugbotmap.org {
+    reverse_proxy /stream server:8080
+    reverse_proxy /source server:8080
+    reverse_proxy * client:3000
+}

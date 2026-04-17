@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  client:
+    build: ./client
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server          
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    stdin_open: true
+    environment:
+      - CHOKIDAR_USEPOLLING=true
+
+  server:
+    build: ./server
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./server:/app
+      - /app/node_modules
