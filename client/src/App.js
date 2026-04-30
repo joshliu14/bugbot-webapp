@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import "./App.css"; // Ensure you import the CSS file
 
 const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
 
@@ -14,10 +15,14 @@ function App() {
   const drawFrame = useCallback((pixels, width, height, maxval) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    
+    // The actual internal resolution of the canvas remains unchanged
     canvas.width = width;
     canvas.height = height;
+    
     const ctx = canvas.getContext("2d");
     const imageData = ctx.createImageData(width, height);
+    
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
         const idx = (y * width + x) * 4;
@@ -87,40 +92,40 @@ function App() {
   const sourceColor = sourceActive ? "#00ff88" : "#ff4455";
 
   return (
-    <div style={styles.root}>
-      <div style={styles.panel}>
-        <div style={styles.header}>
-          <span style={styles.title}>PGM STREAM</span>
-          <div style={styles.badges}>
-            <span style={{ ...styles.badge, background: statusColor }}>
+    <div className="root">
+      <div className="panel">
+        <div className="header">
+          <span className="title">PGM STREAM</span>
+          <div className="badges">
+            <span className="badge" style={{ background: statusColor }}>
               SERVER {status.toUpperCase()}
             </span>
-            <span style={{ ...styles.badge, background: sourceColor }}>
+            <span className="badge" style={{ background: sourceColor }}>
               SOURCE {sourceActive ? "LIVE" : "WAITING"}
             </span>
           </div>
         </div>
 
-        <div style={styles.canvasWrapper}>
-          <canvas ref={canvasRef} style={styles.canvas} />
+        <div className="canvas-wrapper">
+          <canvas ref={canvasRef} className="canvas" />
           {!sourceActive && (
-            <div style={styles.overlay}>
-              <span style={styles.overlayText}>
+            <div className="overlay">
+              <span className="overlay-text">
                 {status === "connected" ? "Waiting for source…" : "Connecting to server…"}
               </span>
             </div>
           )}
         </div>
 
-        <div style={styles.statsRow}>
+        <div className="stats-row">
           <Stat label="FRAME" value={stats.frame || "—"} />
           <Stat label="FPS" value={stats.fps || "—"} />
           <Stat label="SIZE" value={stats.width ? `${stats.width}×${stats.height}` : "—"} />
         </div>
 
-        <div style={styles.pgmBox}>
-          <span style={styles.pgmLabel}>PGM HEADER</span>
-          <code style={styles.pgmCode}>{pgmHeader || "waiting for data…"}</code>
+        <div className="pgm-box">
+          <span className="pgm-label">PGM HEADER</span>
+          <code className="pgm-code">{pgmHeader || "waiting for data…"}</code>
         </div>
       </div>
     </div>
@@ -129,102 +134,11 @@ function App() {
 
 function Stat({ label, value }) {
   return (
-    <div style={styles.stat}>
-      <span style={styles.statLabel}>{label}</span>
-      <span style={styles.statValue}>{value}</span>
+    <div className="stat">
+      <span className="stat-label">{label}</span>
+      <span className="stat-value">{value}</span>
     </div>
   );
 }
-
-const styles = {
-  root: {
-    minHeight: "100vh",
-    background: "#0a0a0f",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "'Courier New', monospace",
-  },
-  panel: {
-    background: "#111118",
-    border: "1px solid #2a2a3a",
-    borderRadius: 4,
-    padding: 24,
-    width: 420,
-    boxShadow: "0 0 40px rgba(0,255,136,0.05)",
-  },
-  header: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 16,
-  },
-  title: {
-    color: "#e0e0e0",
-    fontSize: 13,
-    letterSpacing: "0.15em",
-    fontWeight: 700,
-  },
-  badges: { display: "flex", gap: 6 },
-  badge: {
-    fontSize: 10,
-    fontWeight: 700,
-    letterSpacing: "0.1em",
-    padding: "3px 8px",
-    borderRadius: 2,
-    color: "#000",
-  },
-  canvasWrapper: {
-    position: "relative",
-    background: "#000",
-    borderRadius: 2,
-    overflow: "hidden",
-    marginBottom: 12,
-    border: "1px solid #1e1e2e",
-    lineHeight: 0,
-    minHeight: 120,
-  },
-  canvas: {
-    width: "100%",
-    imageRendering: "pixelated",
-    display: "block",
-  },
-  overlay: {
-    position: "absolute",
-    inset: 0,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    background: "rgba(0,0,0,0.85)",
-  },
-  overlayText: { color: "#555", fontSize: 11, letterSpacing: "0.1em" },
-  statsRow: { display: "flex", gap: 8, marginBottom: 12 },
-  stat: {
-    flex: 1,
-    background: "#0d0d16",
-    border: "1px solid #1e1e2e",
-    borderRadius: 2,
-    padding: "8px 12px",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-  },
-  statLabel: { color: "#555", fontSize: 9, letterSpacing: "0.12em" },
-  statValue: { color: "#00ff88", fontSize: 18, fontWeight: 700 },
-  pgmBox: {
-    background: "#0d0d16",
-    border: "1px solid #1e1e2e",
-    borderRadius: 2,
-    padding: "10px 12px",
-  },
-  pgmLabel: {
-    color: "#555",
-    fontSize: 9,
-    letterSpacing: "0.12em",
-    display: "block",
-    marginBottom: 6,
-  },
-  pgmCode: { color: "#7a7aff", fontSize: 11, wordBreak: "break-all", display: "block" },
-};
 
 export default App;
