@@ -1,110 +1,48 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import "./App.css";
+import "./App.css"; // Ensure you import the CSS file
 
-// Automatically use wss:// in production and ws:// in local development
 const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
 
 function App() {
-  const mapCanvasRef = useRef(null);
-  const overlayCanvasRef = useRef(null);
+  const canvasRef = useRef(null);
   const wsRef = useRef(null);
-
+  const [status, setStatus] = useState("connecting");
   const [sourceActive, setSourceActive] = useState(false);
-  const [fps, setFps] = useState(0);
-  const [stats, setStats] = useState({ width: 0, height: 0, frame: 0 });
+  const [stats, setStats] = useState({ frame: 0, fps: 0, width: 0, height: 0 });
+  const [pgmHeader, setPgmHeader] = useState("");
+  const fpsCounterRef = useRef({ count: 0, last: Date.now() });
 
-  const lastFrameTimeRef = useRef(performance.now());
-  const frameCountRef = useRef(0);
-
-  // 1. Function to draw the base PGM Map
-  const drawFrame = useCallback((pixels, width, height) => {
-    const canvas = mapCanvasRef.current;
+  const drawFrame = useCallback((pixels, width, height, maxval) => {
+    const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // Only resize the internal canvas resolution if the map size changes
-    if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-    }
-
+    // The actual internal resolution of the canvas remains unchanged
+    canvas.width = width;
+    canvas.height = height;
+    
     const ctx = canvas.getContext("2d");
     const imageData = ctx.createImageData(width, height);
-    const data = imageData.data;
-
-    // Flatten the 2D array from Python and map to RGBA
-    let i = 0;
+    
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const val = pixels[y][x];
-        data[i] = val;     // R
-        data[i + 1] = val; // G
-        data[i + 2] = val; // B
-        data[i + 3] = 255; // Alpha (fully opaque)
-        i += 4;
+        const idx = (y * width + x) * 4;
+        const gray = Math.round((pixels[y][x] / maxval) * 255);
+        imageData.data[idx] = gray;
+        imageData.data[idx + 1] = gray;
+        imageData.data[idx + 2] = gray;
+        imageData.data[idx + 3] = 255;
       }
     }
     ctx.putImageData(imageData, 0, 0);
   }, []);
 
-  // 2. Function to draw the Robot Overlay (NOW BULLETPROOF)
-  const drawRobot = useCallback((pose, mapInfo, width, height) => {
-    const canvas = overlayCanvasRef.current;
-    if (!canvas) return;
-    
-    // The overlay must have the exact same internal resolution as the map
-    if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width;
-        canvas.height = height;
-    }
-    
-    const ctx = canvas.getContext("2d");
-    
-    // ALWAYS clear the canvas first. This prevents a "ghost" robot 
-    // from getting stuck if the pose data suddenly drops out.
-    ctx.clearRect(0, 0, width, height); 
-
-    // SAFETY CHECKS: Ensure objects exist
-    if (!pose || !mapInfo) return;
-
-    // SAFETY CHECKS: Ensure the required numbers are actually present and valid
-    if (
-        typeof pose.x !== 'number' || 
-        typeof pose.y !== 'number' || 
-        typeof pose.theta !== 'number' ||
-        typeof mapInfo.origin_x !== 'number' ||
-        typeof mapInfo.origin_y !== 'number' ||
-        typeof mapInfo.resolution !== 'number'
-    ) {
-        return; // Exit silently without crashing if data is malformed
-    }
-
-    // Convert ROS real-world coordinates to HTML Canvas pixels
-    const pixelX = (pose.x - mapInfo.origin_x) / mapInfo.resolution;
-    const pixelY = height - ((pose.y - mapInfo.origin_y) / mapInfo.resolution);
-    const canvasTheta = -pose.theta; // Invert rotation for canvas
-
-    // Draw the Robot Marker
-    ctx.save();
-    ctx.translate(pixelX, pixelY);
-    ctx.rotate(canvasTheta);
-    
-    ctx.fillStyle = "#00ff88"; // Bright green
-    ctx.beginPath();
-    ctx.moveTo(10, 0);     // Nose of the robot
-    ctx.lineTo(-10, 8);    // Back left
-    ctx.lineTo(-10, -8);   // Back right
-    ctx.fill();
-    
-    ctx.restore();
-  }, []);
-
-  // 3. WebSocket Connection & Data Handling
   useEffect(() => {
     function connect() {
+      setStatus("connecting");
       const ws = new WebSocket(WS_URL);
       wsRef.current = ws;
 
-      ws.onopen = () => console.log("Connected to viewer stream");
+      ws.onopen = () => setStatus("connected");
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
@@ -113,96 +51,92 @@ function App() {
           setSourceActive(true);
         } else if (msg.type === "source_disconnected") {
           setSourceActive(false);
-          setStats({ width: 0, height: 0, frame: 0 });
-          setFps(0);
-          
-          // Clear both canvases when stream stops
-          const mCtx = mapCanvasRef.current?.getContext("2d");
-          mCtx?.clearRect(0, 0, mapCanvasRef.current?.width || 0, mapCanvasRef.current?.height || 0);
-          
-          const oCtx = overlayCanvasRef.current?.getContext("2d");
-          oCtx?.clearRect(0, 0, overlayCanvasRef.current?.width || 0, overlayCanvasRef.current?.height || 0);
-          
+          setPgmHeader("");
+          setStats({ frame: 0, fps: 0, width: 0, height: 0 });
         } else if (msg.type === "pgm_frame") {
-          setSourceActive(true);
-          
-          // Draw the background map
-          drawFrame(msg.pixels, msg.width, msg.height);
-          
-          // ALWAYS call drawRobot. If msg.robot_pose is undefined, 
-          // drawRobot will safely catch it and just clear the canvas.
-          drawRobot(msg.robot_pose, msg.map_info, msg.width, msg.height);
+          drawFrame(msg.pixels, msg.width, msg.height, msg.maxval);
 
-          setStats({ width: msg.width, height: msg.height, frame: msg.frame });
-
-          // Calculate FPS
-          frameCountRef.current += 1;
-          const now = performance.now();
-          if (now - lastFrameTimeRef.current >= 1000) {
-            setFps(frameCountRef.current);
-            frameCountRef.current = 0;
-            lastFrameTimeRef.current = now;
+          const now = Date.now();
+          fpsCounterRef.current.count++;
+          const elapsed = now - fpsCounterRef.current.last;
+          if (elapsed >= 1000) {
+            const fps = Math.round((fpsCounterRef.current.count / elapsed) * 1000);
+            fpsCounterRef.current = { count: 0, last: now };
+            setStats({ frame: msg.frame, fps, width: msg.width, height: msg.height });
           }
+
+          const headerLines = msg.pgm.split("\n").slice(0, 3).join("  |  ");
+          setPgmHeader(headerLines);
         }
       };
 
       ws.onclose = () => {
-        console.log("WebSocket disconnected, reconnecting in 2s...");
+        setStatus("disconnected");
         setSourceActive(false);
         setTimeout(connect, 2000);
       };
+
+      ws.onerror = () => ws.close();
     }
 
     connect();
     return () => wsRef.current?.close();
-  }, [drawFrame, drawRobot]);
+  }, [drawFrame]);
+
+  const statusColor = {
+    connected: "#00ff88",
+    connecting: "#ffcc00",
+    disconnected: "#ff4455",
+  }[status];
+
+  const sourceColor = sourceActive ? "#00ff88" : "#ff4455";
 
   return (
     <div className="root">
       <div className="panel">
-        <h2>Live SLAM Map Viewer</h2>
-        
-        {/* Canvas Wrapper */}
-        <div className="canvas-wrapper" style={{ position: "relative", width: "100%", height: "600px", background: "#000", overflow: "hidden" }}>
-          
-          {/* Base Map Canvas (z-index 1) */}
-          <canvas 
-            ref={mapCanvasRef} 
-            className="canvas" 
-            style={{ 
-                position: "absolute", top: 0, left: 0, width: "100%", height: "100%", 
-                zIndex: 1, imageRendering: "pixelated", objectFit: "contain" 
-            }} 
-          />
-          
-          {/* Robot Overlay Canvas (z-index 2) */}
-          <canvas 
-            ref={overlayCanvasRef} 
-            className="canvas" 
-            style={{ 
-                position: "absolute", top: 0, left: 0, width: "100%", height: "100%", 
-                zIndex: 2, background: "transparent", imageRendering: "pixelated", objectFit: "contain" 
-            }} 
-          />
-          
-          {/* Offline Message (z-index 3) */}
+        <div className="header">
+          <span className="title">PGM STREAM</span>
+          <div className="badges">
+            <span className="badge" style={{ background: statusColor }}>
+              SERVER {status.toUpperCase()}
+            </span>
+            <span className="badge" style={{ background: sourceColor }}>
+              SOURCE {sourceActive ? "LIVE" : "WAITING"}
+            </span>
+          </div>
+        </div>
+
+        <div className="canvas-wrapper">
+          <canvas ref={canvasRef} className="canvas" />
           {!sourceActive && (
-             <div style={{ position: "absolute", zIndex: 3, color: "white", width: "100%", textAlign: "center", top: "50%", transform: "translateY(-50%)" }}>
-                Waiting for ROS stream...
-             </div>
+            <div className="overlay">
+              <span className="overlay-text">
+                {status === "connected" ? "Waiting for source…" : "Connecting to server…"}
+              </span>
+            </div>
           )}
         </div>
 
-        {/* Stats Footer */}
-        <div style={{ color: "#a6accd", marginTop: "16px", display: "flex", justifyContent: "space-between" }}>
-            <span>Status: <strong style={{ color: sourceActive ? "#00ff88" : "#f07178" }}>{sourceActive ? "Live" : "Offline"}</strong></span>
-            {sourceActive && (
-                <span>
-                    Map: {stats.width}x{stats.height} | Frame: {stats.frame} | {fps} FPS
-                </span>
-            )}
+        <div className="stats-row">
+          <Stat label="FRAME" value={stats.frame || "—"} />
+          <Stat label="FPS" value={stats.fps || "—"} />
+          <Stat label="SIZE" value={stats.width ? `${stats.width}×${stats.height}` : "—"} />
+        </div>
+
+        <div className="pgm-box">
+          <span className="pgm-label">PGM HEADER</span>
+          <code className="pgm-code">{pgmHeader || "waiting for data…"}</code>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="stat">
+      <span className="stat-label">{label}</span>
+      <span className="stat-value">{value}</span>
     </div>
   );
 }
