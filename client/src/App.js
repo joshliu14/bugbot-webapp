@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import "./App.css"; // Ensure you import the CSS file
+import "./App.css";
 
 const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.host}/stream`;
 
 function App() {
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
+  const currentPgmRef = useRef(""); // Store PGM data for download
   const [status, setStatus] = useState("connecting");
   const [sourceActive, setSourceActive] = useState(false);
   const [stats, setStats] = useState({ frame: 0, fps: 0, width: 0, height: 0 });
@@ -16,7 +17,6 @@ function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
-    // The actual internal resolution of the canvas remains unchanged
     canvas.width = width;
     canvas.height = height;
     
@@ -36,6 +36,20 @@ function App() {
     ctx.putImageData(imageData, 0, 0);
   }, []);
 
+  const handleDownload = () => {
+    if (!currentPgmRef.current) return;
+    
+    const blob = new Blob([currentPgmRef.current], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `map_frame_${stats.frame}.pgm`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   useEffect(() => {
     function connect() {
       setStatus("connecting");
@@ -52,8 +66,10 @@ function App() {
         } else if (msg.type === "source_disconnected") {
           setSourceActive(false);
           setPgmHeader("");
+          currentPgmRef.current = "";
           setStats({ frame: 0, fps: 0, width: 0, height: 0 });
         } else if (msg.type === "pgm_frame") {
+          currentPgmRef.current = msg.pgm; // Store full PGM string
           drawFrame(msg.pixels, msg.width, msg.height, msg.maxval);
 
           const now = Date.now();
@@ -81,7 +97,7 @@ function App() {
 
     connect();
     return () => wsRef.current?.close();
-  }, [drawFrame]);
+  }, [drawFrame, stats.frame]);
 
   const statusColor = {
     connected: "#00ff88",
@@ -96,13 +112,22 @@ function App() {
       <div className="panel">
         <div className="header">
           <span className="title">PGM STREAM</span>
-          <div className="badges">
-            <span className="badge" style={{ background: statusColor }}>
-              SERVER {status.toUpperCase()}
-            </span>
-            <span className="badge" style={{ background: sourceColor }}>
-              SOURCE {sourceActive ? "LIVE" : "WAITING"}
-            </span>
+          <div className="header-actions">
+            <button 
+              className="download-button" 
+              onClick={handleDownload}
+              disabled={!sourceActive}
+            >
+              DOWNLOAD PGM
+            </button>
+            <div className="badges">
+              <span className="badge" style={{ background: statusColor }}>
+                SERVER {status.toUpperCase()}
+              </span>
+              <span className="badge" style={{ background: sourceColor }}>
+                SOURCE {sourceActive ? "LIVE" : "WAITING"}
+              </span>
+            </div>
           </div>
         </div>
 

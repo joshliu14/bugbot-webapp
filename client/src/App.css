@@ -24,6 +24,38 @@
   margin-bottom: 16px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.download-button {
+  background: transparent;
+  border: 1px solid #2a2a3a;
+  color: #00ff88;
+  font-family: 'Courier New', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: all 0.2s;
+  letter-spacing: 0.05em;
+}
+
+.download-button:hover:not(:disabled) {
+  background: #00ff88;
+  color: #000;
+  border-color: #00ff88;
+}
+
+.download-button:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+  color: #555;
+}
+
 .title {
   color: #e0e0e0;
   font-size: 13px;
