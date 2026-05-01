@@ -6,7 +6,9 @@ const WS_URL = `${window.location.protocol === "https:" ? "wss" : "ws"}://${wind
 function App() {
   const canvasRef = useRef(null);
   const wsRef = useRef(null);
-  const currentPgmRef = useRef(""); // Store PGM data for download
+  const currentPgmRef = useRef(""); // Stores raw PGM data for download
+  const frameRef = useRef(0);      // Tracks frame number without re-renders
+  
   const [status, setStatus] = useState("connecting");
   const [sourceActive, setSourceActive] = useState(false);
   const [stats, setStats] = useState({ frame: 0, fps: 0, width: 0, height: 0 });
@@ -43,7 +45,7 @@ function App() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `map_frame_${stats.frame}.pgm`;
+    link.download = `map_frame_${frameRef.current}.pgm`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -69,15 +71,20 @@ function App() {
           currentPgmRef.current = "";
           setStats({ frame: 0, fps: 0, width: 0, height: 0 });
         } else if (msg.type === "pgm_frame") {
-          currentPgmRef.current = msg.pgm; // Store full PGM string
+          // Update refs (synchronous, no re-render)
+          currentPgmRef.current = msg.pgm;
+          frameRef.current = msg.frame;
+
           drawFrame(msg.pixels, msg.width, msg.height, msg.maxval);
 
           const now = Date.now();
           fpsCounterRef.current.count++;
           const elapsed = now - fpsCounterRef.current.last;
+          
           if (elapsed >= 1000) {
             const fps = Math.round((fpsCounterRef.current.count / elapsed) * 1000);
             fpsCounterRef.current = { count: 0, last: now };
+            // Update state (triggers UI re-render once per second)
             setStats({ frame: msg.frame, fps, width: msg.width, height: msg.height });
           }
 
@@ -96,8 +103,14 @@ function App() {
     }
 
     connect();
-    return () => wsRef.current?.close();
-  }, [drawFrame, stats.frame]);
+
+    // Clean up only when component unmounts
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, [drawFrame]); // Correctly omitted 'stats' to prevent reconnection loops
 
   const statusColor = {
     connected: "#00ff88",
